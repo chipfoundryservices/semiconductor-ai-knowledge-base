@@ -1,0 +1,56 @@
+name: Deploy Knowledge Base to ChipFoundryServices.com
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'topics/**'
+      - 'INDEX.md'
+      - 'README.md'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.CFS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.CFS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Create topics dir on server
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ${{ secrets.CFS_USER }}@${{ secrets.CFS_HOST }} \
+            "mkdir -p ${{ secrets.CFS_WEBROOT }}/topics"
+
+      - name: Deploy topics via rsync
+        run: |
+          rsync -rltz \
+            --no-perms --no-owner --no-group \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
+            ./topics/ \
+            ${{ secrets.CFS_USER }}@${{ secrets.CFS_HOST }}:${{ secrets.CFS_WEBROOT }}/topics/
+
+      - name: Deploy index files
+        run: |
+          rsync -rltz \
+            --no-perms --no-owner --no-group \
+            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
+            ./INDEX.md ./README.md \
+            ${{ secrets.CFS_USER }}@${{ secrets.CFS_HOST }}:${{ secrets.CFS_WEBROOT }}/
+
+      - name: Verify deployment
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ${{ secrets.CFS_USER }}@${{ secrets.CFS_HOST }} \
+            "echo 'KB Deploy OK at \$(date)' && \
+             echo 'Topics count:' \$(ls ${{ secrets.CFS_WEBROOT }}/topics/ | wc -l) && \
+             ls -lt ${{ secrets.CFS_WEBROOT }}/topics/ | head -5"
